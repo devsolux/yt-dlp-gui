@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yt-dlp-gui"
+version = "1.0.0"
+description = "YT-DLP GUI - Video & Audio Downloader"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Baris Aydin", email = "devsolux@gmail.com"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "yt-dlp>=2025.08.22",
+    "customtkinter>=5.2.2",
+    "pillow>=11.3.0",
+    "requests>=2.32.5",
+    "packaging>=25.0",
+    "psutil>=7.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyinstaller>=6.15.0",
+]
+
+[project.scripts]
+yt-dlp-gui = "ytdlp_gui.main:main"
+
+[project.urls]
+Homepage = "https://github.com/devsolux/yt-dlp-gui"
+Repository = "https://github.com/devsolux/yt-dlp-gui"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ytdlp_gui = ["assets/*"]
+
+

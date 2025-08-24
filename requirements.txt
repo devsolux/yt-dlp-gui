@@ -1,0 +1,6 @@
+yt-dlp>=2025.08.22
+customtkinter>=5.2.2
+pillow>=11.3.0
+requests>=2.32.5
+packaging>=25.0
+psutil>=7.0.0
