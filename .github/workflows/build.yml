@@ -83,47 +83,114 @@ jobs:
     needs: build
     steps:
       - name: Download Linux artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: dist-ubuntu-latest
           path: artifacts/ubuntu
 
       - name: Download Windows artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: dist-windows-latest
           path: artifacts/windows
 
       - name: Download macOS artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: dist-macos-latest
           path: artifacts/macos
 
-      - id: create_release
-        name: Create GitHub Release
-        uses: actions/create-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: ${{ github.ref_name }}
-          body: "Automated build for ${{ github.ref_name }}"
-          draft: false
-          prerelease: false
+      - id: prepare_release
+        name: Get or create release, remove conflicting assets, upload files
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload release assets (all files from artifacts/)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          UPLOAD_URL: ${{ steps.create_release.outputs.upload_url }}
         run: |
-          set -e
-          for f in $(find artifacts -type f); do
-            filename=$(basename "$f")
-            echo "Uploading $f as $filename ..."
-            curl -sS -X POST "$UPLOAD_URL?name=$filename" \
-              -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary @"$f"
+          set -euo pipefail
+
+          # Ensure jq is available
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+
+          TAG="${{ github.ref_name }}"
+          API="https://api.github.com/repos/${{ github.repository }}"
+
+          echo "Looking for release with tag: $TAG"
+          resp="$(curl -sS -H "Authorization: token $GITHUB_TOKEN" "$API/releases/tags/$TAG" || true)"
+          upload_url="$(echo "$resp" | jq -r '.upload_url // empty')"
+          release_id="$(echo "$resp" | jq -r '.id // empty')"
+
+          if [ -z "$upload_url" ]; then
+            echo "No existing release found, creating one..."
+            payload=$(jq -n --arg tag "$TAG" --arg name "$TAG" --arg body "Automated build for $TAG" \
+              '{ tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false }')
+            resp="$(curl -sS -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/json" -d "$payload" "$API/releases")"
+            upload_url="$(echo "$resp" | jq -r '.upload_url')
+            release_id="$(echo "$resp" | jq -r '.id')"
+            if [ -z "$upload_url" ] || [ -z "$release_id" ]; then
+              echo "Failed to create release. Response:"
+              echo "$resp"
+              exit 1
+            fi
+          else
+            echo "Found existing release (id=$release_id)"
+          fi
+
+          # Remove the template part like {?name,label}
+          upload_url=${upload_url%\{*}
+          echo "upload_url=$upload_url" >> "$GITHUB_OUTPUT"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+          # Pre-fetch existing assets for this release
+          echo "Fetching existing assets for release id $release_id..."
+          assets_resp="$(curl -sS -H "Authorization: token $GITHUB_TOKEN" "$API/releases/$release_id/assets")"
+
+          # Upload each file in artifacts/, removing an existing asset with the same name first.
+          find artifacts -type f | while read -r f; do
+            filename="$(basename "$f")"
             echo
+            echo "Processing $f -> $filename"
+
+            # If asset with same name exists, delete it first
+            existing_asset_id="$(echo "$assets_resp" | jq -r --arg name "$filename" '.[] | select(.name == $name) | .id' | head -n1 || true)"
+            if [ -n "$existing_asset_id" ]; then
+              echo "Asset $filename already exists (id=$existing_asset_id) — deleting it before upload..."
+              del_resp="$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE -H "Authorization: token $GITHUB_TOKEN" "$API/releases/assets/$existing_asset_id" || true)"
+              if [ "$del_resp" != "204" ]; then
+                echo "Warning: failed to delete existing asset (HTTP $del_resp). Continuing and attempting upload."
+              else
+                echo "Deleted existing asset id $existing_asset_id"
+              fi
+            fi
+
+            # upload with retries
+            attempts=0
+            max_attempts=3
+            until [ $attempts -ge $max_attempts ]; do
+              attempts=$((attempts+1))
+              echo "Uploading attempt $attempts/$max_attempts for $filename ..."
+              http_status=$(curl -sS -o /tmp/upload_resp -w "%{http_code}" \
+                -X POST "${upload_url}?name=$(printf '%s' "$filename" | jq -s -R -r @uri)" \
+                -H "Authorization: token $GITHUB_TOKEN" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary @"$f" || true)
+
+              if [ "$http_status" -ge 200 ] && [ "$http_status" -lt 300 ]; then
+                echo "Uploaded $filename (HTTP $http_status)"
+                break
+              else
+                echo "Upload failed with HTTP $http_status. Response:"
+                sed -n '1,200p' /tmp/upload_resp || true
+                if [ $attempts -lt $max_attempts ]; then
+                  echo "Retrying in 3s..."
+                  sleep 3
+                else
+                  echo "Upload failed after $max_attempts attempts"
+                  exit 1
+                fi
+              fi
+            done
           done
+
+          echo "All artifacts processed."
