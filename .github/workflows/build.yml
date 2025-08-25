@@ -107,32 +107,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
+          
           # Ensure jq is available
           if ! command -v jq >/dev/null 2>&1; then
             sudo apt-get update
             sudo apt-get install -y jq
           fi
-
+          
           TAG="${{ github.ref_name }}"
           API="https://api.github.com/repos/${{ github.repository }}"
-
+          
           echo "Looking for release with tag: $TAG"
           resp="$(curl -sS -H "Authorization: token $GITHUB_TOKEN" "$API/releases/tags/$TAG" || true)"
           upload_url="$(echo "$resp" | jq -r '.upload_url // empty')"
           release_id="$(echo "$resp" | jq -r '.id // empty')"
-
+          
           if [ -z "$upload_url" ]; then
             echo "No existing release found, attempting to create one..."
             payload=$(jq -n --arg tag "$TAG" --arg name "$TAG" --arg body "Automated build for $TAG" \
               '{ tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false }')
-
-            # Create release and capture HTTP status + body
+          
             create_http_status="$(curl -sS -o /tmp/create_body -w "%{http_code}" \
               -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/json" \
               -d "$payload" "$API/releases" || true)"
             create_body="$(cat /tmp/create_body || true)"
-
+          
             if [ "$create_http_status" -ge 200 ] && [ "$create_http_status" -lt 300 ]; then
               upload_url="$(echo "$create_body" | jq -r '.upload_url')"
               release_id="$(echo "$create_body" | jq -r '.id')"
@@ -157,22 +156,40 @@ jobs:
           else
             echo "Found existing release (id=$release_id)"
           fi
-
+          
           # Strip template part like {?name,label}
           upload_url=${upload_url%\{*}
           echo "upload_url=$upload_url" >> "$GITHUB_OUTPUT"
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-
+          
           # Pre-fetch existing assets for this release
           echo "Fetching existing assets for release id $release_id..."
           assets_resp="$(curl -sS -H "Authorization: token $GITHUB_TOKEN" "$API/releases/$release_id/assets" || true)"
-
-          # Upload each file in artifacts/, removing an existing asset with the same name first.
-          find artifacts -type f -print0 | while IFS= read -r -d '' f; do
+          
+          # --- IMPORTANT: only upload actual release artifact files ---
+          # Adjust the patterns below to match the files your build produces.
+          # Example whitelist: .dmg .zip .tar.gz .tgz .exe .AppImage .deb .pkg .tar.xz and top-level App binary names
+          # You can add/remove -iname patterns for your actual outputs.
+          find_cmd=(
+            find artifacts -type f \(
+              -iname '*.dmg' -o -iname '*.zip' -o -iname '*.tar.gz' -o -iname '*.tgz' -o -iname '*.tar.xz' \
+              -o -iname '*.exe' -o -iname '*.AppImage' -o -iname '*.deb' -o -iname '*.pkg' \
+              -o -iname 'YT-DLP-GUI*' \
+            \) -print0
+          )
+          
+          # Use process substitution to avoid "find: Broken pipe" errors
+          while IFS= read -r -d '' f; do
             filename="$(basename "$f")"
             echo
             echo "Processing $f -> $filename"
-
+          
+            # Skip empty files (GitHub rejects zero-byte assets)
+            if [ ! -s "$f" ]; then
+              echo "Skipping zero-length file: $f"
+              continue
+            fi
+          
             # If asset with same name exists, delete it first
             existing_asset_id="$(echo "$assets_resp" | jq -r --arg name "$filename" '.[] | select(.name == $name) | .id' | head -n1 || true)"
             if [ -n "$existing_asset_id" ]; then
@@ -184,10 +201,10 @@ jobs:
                 echo "Deleted existing asset id $existing_asset_id"
               fi
             fi
-
+          
             # URL-encode filename for upload URL
             encoded_name="$(printf '%s' "$filename" | jq -s -R -r @uri)"
-
+          
             # upload with retries
             attempts=0
             max_attempts=3
@@ -214,6 +231,6 @@ jobs:
                 fi
               fi
             done
-          done
-
+          done < <("${find_cmd[@]}")
+          
           echo "All artifacts processed."
