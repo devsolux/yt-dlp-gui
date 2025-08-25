@@ -101,7 +101,7 @@ jobs:
           path: artifacts/macos
 
       - id: prepare_release
-        name: Get or create release, remove conflicting assets, upload files
+        name: Create Release and upload assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -162,38 +162,45 @@ jobs:
           echo "upload_url=$upload_url" >> "$GITHUB_OUTPUT"
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
           
-          # Pre-fetch existing assets for this release
-          echo "Fetching existing assets for release id $release_id..."
-          assets_resp="$(curl -sS -H "Authorization: token $GITHUB_TOKEN" "$API/releases/$release_id/assets" || true)"
-          
-          # --- IMPORTANT: only upload actual release artifact files ---
-          # Adjust the patterns below to match the files your build produces.
-          # Example whitelist: .dmg .zip .tar.gz .tgz .exe .AppImage .deb .pkg .tar.xz and top-level App binary names
-          # You can add/remove -iname patterns for your actual outputs.
+          echo "Collecting artifacts to upload..."
+          # Whitelist typical release artifacts and exclude internal PyInstaller bundle files
+          # Adjust patterns as needed for your project outputs.
           find_cmd=(
-            find artifacts -type f \(
-              -iname '*.dmg' -o -iname '*.zip' -o -iname '*.tar.gz' -o -iname '*.tgz' -o -iname '*.tar.xz' \
-              -o -iname '*.exe' -o -iname '*.AppImage' -o -iname '*.deb' -o -iname '*.pkg' \
-              -o -iname 'YT-DLP-GUI*' \
-            \) -print0
+            find artifacts -type f \
+              \( -iname '*.dmg' -o -iname '*.zip' -o -iname '*.tar.gz' -o -iname '*.tgz' -o -iname '*.tar.xz' \
+                 -o -iname '*.exe' -o -iname '*.AppImage' -o -iname '*.deb' -o -iname '*.pkg' -o -iname '*.msi' \
+                 -o -iname 'YT-DLP-GUI*' \) \
+              -not -path '*/_internal/*' \
+              -not -path '*/Contents/*' \
+              -print0
           )
           
-          # Use process substitution to avoid "find: Broken pipe" errors
+          # Track basenames we've already handled during this run to avoid duplicate-name uploads (HTTP 422)
+          declare -A seen_names=()
+          
           while IFS= read -r -d '' f; do
             filename="$(basename "$f")"
             echo
             echo "Processing $f -> $filename"
           
-            # Skip empty files (GitHub rejects zero-byte assets)
+            # Skip zero-length files (GitHub rejects zero-byte assets)
             if [ ! -s "$f" ]; then
               echo "Skipping zero-length file: $f"
               continue
             fi
           
-            # If asset with same name exists, delete it first
+            # Skip duplicate basenames within this workflow run (prevents 422 already_exists)
+            if [[ -n "${seen_names[$filename]:-}" ]]; then
+              echo "Skipping duplicate filename in this run: $filename"
+              continue
+            fi
+            seen_names[$filename]=1
+          
+            # If asset with same name already exists on the release, delete it first (fresh upload)
+            assets_resp="$(curl -sS -H "Authorization: token $GITHUB_TOKEN" "$API/releases/$release_id/assets?per_page=100" || true)"
             existing_asset_id="$(echo "$assets_resp" | jq -r --arg name "$filename" '.[] | select(.name == $name) | .id' | head -n1 || true)"
-            if [ -n "$existing_asset_id" ]; then
-              echo "Asset $filename already exists (id=$existing_asset_id) — deleting it before upload..."
+            if [ -n "${existing_asset_id:-}" ]; then
+              echo "Asset $filename already exists on release (id=$existing_asset_id) — deleting it before upload..."
               del_status="$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE -H "Authorization: token $GITHUB_TOKEN" "$API/releases/assets/$existing_asset_id" || true)"
               if [ "$del_status" != "204" ]; then
                 echo "Warning: failed to delete existing asset (HTTP $del_status). Continuing and attempting upload."
@@ -205,7 +212,7 @@ jobs:
             # URL-encode filename for upload URL
             encoded_name="$(printf '%s' "$filename" | jq -s -R -r @uri)"
           
-            # upload with retries
+            # Upload with retries
             attempts=0
             max_attempts=3
             until [ $attempts -ge $max_attempts ]; do

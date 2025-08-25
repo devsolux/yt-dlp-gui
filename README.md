@@ -1,4 +1,4 @@
-# YT-DLP GUI
+# YT-DLP GUI - YouTube, TikTok and hundreds of sites video and audio downloader
 
 ![Windows](https://img.shields.io/badge/Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)
@@ -38,6 +38,7 @@ python main.py
 ```
 
 ### Build executable
+
 ```bash
 pip install pyinstaller
 
