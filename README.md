@@ -1,18 +1,32 @@
 # YT-DLP GUI - YouTube, TikTok and hundreds of sites video and audio downloader
 
-![Windows](https://img.shields.io/badge/Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)
-![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)
-![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+[![Windows](https://img.shields.io/badge/Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/devsolux/yt-dlp-gui/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/devsolux/yt-dlp-gui/releases/latest)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/devsolux/yt-dlp-gui/releases/latest)
 
-## Description
+![Screenshot of YT-DLP GUI](assets/main.png)
 
-A simple desktop app for downloading videos and audio
-from [hundreds of sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) using yt-dlp.
+Download the latest builds for your platform from the releases page:
 
-**What it does:**
+- Latest releases: https://github.com/devsolux/yt-dlp-gui/releases/latest
 
-- Downloads videos in MP4 (144p to 4K)
-- Extracts audio as MP3
+## Short description
+
+- A user-friendly GUI frontend for yt-dlp that lets you download video and audio from YouTube, TikTok
+  and [hundreds of other websites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
+
+## Quick usage
+
+- Click the badge for your OS above to go straight to the latest release and download the appropriate installer or
+  archive.
+- See the release notes for platform-specific instructions and checksums when provided.
+
+## Resources
+
+- Releases: https://github.com/devsolux/yt-dlp-gui/releases/latest
+- Repository: https://github.com/devsolux/yt-dlp-gui
+- Supported sites (yt-dlp): https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md
+- Issues & feature requests: open an issue on the repository
 
 ## Tech Stack
 
@@ -43,7 +57,6 @@ python main.py
 pip install pyinstaller
 
 rm -rf build/ dist/
-rm -rf *.spec
 python build.py
 ```
 
@@ -55,3 +68,11 @@ python build.py
 4. Select desired quality and format
 5. Click "Start" to begin download
 
+## Screenshot
+
+The primary UI screenshot is included in the repository at `assets/main.png`. Replace this file with an updated
+screenshot if you want to show a different view.
+
+## License
+
+This project is licensed under the terms described in the [LICENSE](LICENSE) file.
